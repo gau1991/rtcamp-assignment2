@@ -11,10 +11,15 @@
 #You should have received a copy of the GNU General Public License along with this program. 
 #If not, see http://www.gnu.org/licenses/.
 
-LOG_FILE=`mktemp`
+#ASSUMPTIONS for Assignment:-
+#NA
+
+LOG_FILE="`mktemp`"
 DOMAIN_NAME=""
 DB_EXT="_db"
-
+DB_ROOT_PASS="root"
+WORDPRESS_ZIP="`mktemp`.zip"
+WORDPRESS_UNZIP_DIR="`mktemp -d`"
 
 if [[ $EUID -ne 0 ]]; then
 	echo "This script must be run as root" 1>&2
@@ -26,29 +31,87 @@ touch $LOG_FILE
 chmod 777 $LOG_FILE
 
 clear
+echo "--------------------------------------------------------------------------"
 echo "		Welcome to WordPress Installer"
 echo "	This is simple shell scripts which will configure"
 echo "	Ngnix, MySQL and PHP5 for latest version of WordPress"
 echo "	This scripts also writes log to file $LOG_FILE"
+echo "--------------------------------------------------------------------------"
 
+echo ""
+echo ""
 echo "Step -1:"
-echo "	Wait while Installing Nginx MySQL and PHP5..."
-debconf-set-selections <<< 'mysql-server mysql-server/root_password password root'
-debconf-set-selections <<< 'mysql-server mysql-server/root_password_again password root'
-apt-get -y install nginx mysql-server php5 php5-fpm > $LOG_FILE 2>&1 
-
-if [ $? -ne 0 ]; then
-	echo "ERROR: Failed to install Required dependencies, Please check logfile $LOG_FILE" 1>&2
-	exit 1
+echo ""
+echo "	Ngnix, MySQL Server & PHP5 Installation..."
+echo ""
+echo "	Checking For Installed Nginx..."
+dpkg-query -s nginx >> $LOG_FILE 2>&1 
+if [ $? -ne 0 ];then
+	echo "	Failed to found installed Nginx, Installing..."
+	apt-get -y install nginx >> $LOG_FILE 2>&1 
+	if [ $? -ne 0 ]; then
+		echo "ERROR: Failed to install Nginx, Please check logfile $LOG_FILE" 1>&2
+		exit 1
+	fi
+else
+	echo "	Found Installed Nginx, Skipping Installation..."
 fi
+echo ""
 
-echo "Step -1 Completed. Nginx, MySQL and PHP5 installtion Done"
+echo "	Checking For Installed MySQL-Server..."
+dpkg-query -s mysql-server >> $LOG_FILE 2>&1 
+if [ $? -ne 0 ];then
+	echo "	Failed to found installed MySQL Server, Installing..."
+	debconf-set-selections <<< 'mysql-server mysql-server/root_password password root'
+	debconf-set-selections <<< 'mysql-server mysql-server/root_password_again password root'
+	apt-get -y install mysql-server >> $LOG_FILE 2>&1 
+	if [ $? -ne 0 ]; then
+		echo "ERROR: Failed to install MySQL Server, Please check logfile $LOG_FILE" 1>&2
+		exit 1
+	fi
+else
+	echo "	Found Installed MySQL Server, Skipping Installation..."
+	echo -n "	Please Enter Database root password:"
+	read DB_ROOT_PASS
+fi
+echo ""
+
+echo "	Checking For Installed PHP5..."
+dpkg-query -s php5 >> $LOG_FILE 2>&1 
+if [ $? -ne 0 ];then
+	echo "	Failed to found installed PHP5, Installing..."
+	apt-get -y install php5 php5-mysql >> $LOG_FILE 2>&1 
+	if [ $? -ne 0 ]; then
+		echo "ERROR: Failed to install PHP5, Please check logfile $LOG_FILE" 1>&2
+		exit 1
+	fi
+else
+	echo "	Found Installed PHP5, Skipping Installation..."
+fi
+echo ""
+
+echo "	Checking For Installed PHP5-FPM..."
+dpkg-query -s php5-fpm >> $LOG_FILE 2>&1 
+if [ $? -ne 0 ];then
+	echo "	Failed to found installed PHP5-FPM, Installing..."
+	apt-get -y install nginx >> $LOG_FILE 2>&1 
+	if [ $? -ne 0 ]; then
+		echo "ERROR: Failed to install PHP5-FPM, Please check logfile $LOG_FILE" 1>&2
+		exit 1
+	fi
+else
+	echo "	Found Installed PHP5-FPM, Skipping Installation..."
+fi
+echo ""
+
+echo "Step -1 Completed. Nginx, MySQL-Server and PHP5 installation Done"
 echo ""
 echo ""
 
 echo "Step -2:"
+echo ""
 echo "	Configuring Nginx..."
-echo -n "Please Enter Domain Name:"
+echo -n "	Please Enter Domain Name:"
 read DOMAIN_NAME
 while [ -z "$DOMAIN_NAME" ];do
 	echo -n "Domain must not be null, Please Reenter:"
@@ -94,31 +157,35 @@ server {
 }
 CONFIG
 
-ln -s /etc/nginx/sites-available/$DOMAIN_NAME /etc/nginx/sites-enabled/$DOMAIN_NAME
-service nginx restart > $LOG_FILE 2>&1 
-service php5-fpm restart > $LOG_FILE 2>&1 
+ln -sf /etc/nginx/sites-available/$DOMAIN_NAME /etc/nginx/sites-enabled/$DOMAIN_NAME
+service nginx restart >> $LOG_FILE 2>&1 
+service php5-fpm restart >> $LOG_FILE 2>&1 
+echo ""
 echo "Step -2 Completed"
 
 echo ""
 echo ""
 
 echo "Step -3"
+echo ""
 echo "	Wait while downloading Wordpress from http://wordpress.org/latest.zip..."
-wget http://wordpress.org/latest.zip > $LOG_FILE 2>&1 
+wget -O $WORDPRESS_ZIP -q http://wordpress.org/latest.zip >> $LOG_FILE 2>&1 
 if [ $? -ne 0 ];then
-	echo "ERROR: Failed to get file http://wordpress.org/latest.zip, Please check log" 1>&2
+	echo "ERROR: Failed to get file http://wordpress.org/latest.zip, Please check logfile $LOG_FILE" 1>&2
 	exit 1
 fi
+echo ""
 echo "Step -3 Completed. Downloading successfull"
 echo ""
 echo ""
 
 echo "Step -4:"
+echo ""
 echo "	UnZipping Wordpress.."
-unzip -o latest.zip > $LOG_FILE 2>&1 
+unzip -o -d $WORDPRESS_UNZIP_DIR $WORDPRESS_ZIP >> $LOG_FILE 2>&1 
 
 if [ $? -ne 0 ];then
-	echo "ERROR: Failed to unzip latest.zip, Please check log" 1>&2
+	echo "ERROR: Failed to unzip latest.zip, Please check logfile $LOG_FILE" 1>&2
 	exit 1
 fi
 
@@ -128,12 +195,11 @@ echo ""
 echo ""
 
 echo "Step -5:"
+echo ""
 echo "	Configuring WordPress..."
 
 mkdir /var/www/$DOMAIN_NAME
-cp -r wordpress/* /var/www/$DOMAIN_NAME
-rm latest.zip
-rm -rf wordpress
+cp -r $WORDPRESS_UNZIP_DIR/wordpress/* /var/www/$DOMAIN_NAME
 sudo chown -R www-data:www-data /var/www/$DOMAIN_NAME
 chmod -R 755 /var/www
 
@@ -235,14 +301,20 @@ echo ""
 echo ""
 echo "Step -6:"
 echo "	Creating MySQL database..."
-mysql --user=root --password=gaurav123 --execute="CREATE DATABASE \`$DOMAIN_NAME$DB_EXT\`; grant all on \`$DOMAIN_NAME$DB_EXT\`.* to 'wordpressuser'@'localhost' identified by 'password'; FLUSH PRIVILEGES;" > $LOG_FILE 2>&1 
+mysql --user=root --password=$DB_ROOT_PASS --execute="CREATE DATABASE \`$DOMAIN_NAME$DB_EXT\`; grant all on \`$DOMAIN_NAME$DB_EXT\`.* to 'wordpressuser'@'localhost' identified by 'password'; FLUSH PRIVILEGES;" >> $LOG_FILE 2>&1 
 
 if [ $? -ne 0 ];then
-	echo "ERROR: Failed to Create Database, Please check log" 1>&2
+	echo "ERROR: Failed to Create Database, Please check logfile $LOG_FILE" 1>&2
 	exit 1
 fi
+
+rm $WORDPRESS_ZIP
+rm -rf $WORDPRES_UNZIP_DIR
+
 echo "Step -7 Completed."
 echo ""
 echo ""
-echo "Script Executed Successfully. Please open http://$DOMAIN_NAME in your faviourate browser to access your WordPress Site"
+echo "Script Executed Successfully." 
+echo "Please open http://$DOMAIN_NAME in your faviourate browser to access your WordPress Site."
+echo "Installtion Log are availble at file $LOG_FILE"
 exit 0;
