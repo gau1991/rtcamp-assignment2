@@ -97,7 +97,7 @@ echo "	Checking For Installed PHP5-FPM..."
 dpkg-query -s php5-fpm >> $LOG_FILE 2>&1 
 if [ $? -ne 0 ];then
 	echo "	Failed to found installed PHP5-FPM, Installing..."
-	apt-get -y install php-5fpm >> $LOG_FILE 2>&1 
+	apt-get -y install php5-fpm >> $LOG_FILE 2>&1 
 	if [ $? -ne 0 ]; then
 		echo "ERROR: Failed to install PHP5-FPM, Please check logfile $LOG_FILE" 1>&2
 		exit 1
