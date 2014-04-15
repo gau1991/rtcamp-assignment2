@@ -18,7 +18,7 @@ LOG_FILE="`mktemp`"
 DOMAIN_NAME=""
 DB_EXT="_db"
 DB_ROOT_PASS="root"
-WORDPRESS_ZIP="`mktemp`.zip"
+WORDPRESS_ZIP="`mktemp`.tar.gz"
 WORDPRESS_UNZIP_DIR="`mktemp -d`"
 LINUX_DISTRO="`lsb_release -i | cut -d':' -f2 | awk '{print $1}'`"
 
@@ -51,6 +51,15 @@ echo "Step -1:"
 echo ""
 echo "	Ngnix, MySQL Server & PHP5 Installation..."
 echo ""
+
+#FIX for #2
+echo "	Updating Package List..."
+apt-get update >> $LOG_FILE 2>&1
+if [ $? -ne 0 ]; then
+	echo "ERROR: Failed to install Nginx, Please check logfile $LOG_FILE" 1>&2
+	exit 1
+fi
+
 echo "	Checking For Installed Nginx..."
 dpkg-query -s nginx >> $LOG_FILE 2>&1 
 if [ $? -ne 0 ];then
@@ -83,6 +92,21 @@ else
 fi
 echo ""
 
+#FIX for #1
+echo "	Checking For Installed PHP5-FPM..."
+dpkg-query -s php5-fpm >> $LOG_FILE 2>&1 
+if [ $? -ne 0 ];then
+	echo "	Failed to found installed PHP5-FPM, Installing..."
+	apt-get -y install nginx >> $LOG_FILE 2>&1 
+	if [ $? -ne 0 ]; then
+		echo "ERROR: Failed to install PHP5-FPM, Please check logfile $LOG_FILE" 1>&2
+		exit 1
+	fi
+else
+	echo "	Found Installed PHP5-FPM, Skipping Installation..."
+fi
+echo ""
+
 echo "	Checking For Installed PHP5..."
 dpkg-query -s php5 >> $LOG_FILE 2>&1 
 if [ $? -ne 0 ];then
@@ -97,19 +121,6 @@ else
 fi
 echo ""
 
-echo "	Checking For Installed PHP5-FPM..."
-dpkg-query -s php5-fpm >> $LOG_FILE 2>&1 
-if [ $? -ne 0 ];then
-	echo "	Failed to found installed PHP5-FPM, Installing..."
-	apt-get -y install nginx >> $LOG_FILE 2>&1 
-	if [ $? -ne 0 ]; then
-		echo "ERROR: Failed to install PHP5-FPM, Please check logfile $LOG_FILE" 1>&2
-		exit 1
-	fi
-else
-	echo "	Found Installed PHP5-FPM, Skipping Installation..."
-fi
-echo ""
 
 echo "Step -1 Completed. Nginx, MySQL-Server and PHP5 installation Done"
 echo ""
@@ -175,10 +186,10 @@ echo ""
 
 echo "Step -3"
 echo ""
-echo "	Wait while downloading Wordpress from http://wordpress.org/latest.zip..."
-wget -O $WORDPRESS_ZIP -q http://wordpress.org/latest.zip >> $LOG_FILE 2>&1 
+echo "	Wait while downloading Wordpress from http://wordpress.org/latest.tar.gz..."
+wget -O $WORDPRESS_ZIP -q http://wordpress.org/latest.tar.gz >> $LOG_FILE 2>&1 
 if [ $? -ne 0 ];then
-	echo "ERROR: Failed to get file http://wordpress.org/latest.zip, Please check logfile $LOG_FILE" 1>&2
+	echo "ERROR: Failed to get file http://wordpress.org/latest.tar.gz, Please check logfile $LOG_FILE" 1>&2
 	exit 1
 fi
 echo ""
@@ -189,12 +200,29 @@ echo ""
 echo "Step -4:"
 echo ""
 echo "	UnZipping Wordpress.."
-unzip -o -d $WORDPRESS_UNZIP_DIR $WORDPRESS_ZIP >> $LOG_FILE 2>&1 
+
+type tar >> $LOG_FILE 2>&1 
+
+#FIX for #3
+if [ $? -ne 0 ];then
+	apt-get install tar >> $LOG_FILE 2>&1
+	if [ $? -ne 0 ];then
+		echo "ERROR: Failed to install TAR utility, Please check logfile $LOG_FILE" 1>&2
+		exit 1
+	fi
+fi
+	
+cd $WORDPRESS_UNZIP_DIR
+tar -xvf $WORDPRESS_ZIP >> $LOG_FILE 2>&1 
+cd - >> $LOG_FILE 2>&1 
 
 if [ $? -ne 0 ];then
-	echo "ERROR: Failed to unzip latest.zip, Please check logfile $LOG_FILE" 1>&2
+	echo "ERROR: Failed to unzip latest.tar.gz, Please check logfile $LOG_FILE" 1>&2
 	exit 1
 fi
+
+echo ""
+echo ""
 
 echo "Step -4 Completed. Unzipping Successfull"
 
@@ -205,120 +233,60 @@ echo "Step -5:"
 echo ""
 echo "	Configuring WordPress..."
 
-mkdir /var/www/$DOMAIN_NAME
-cp -r $WORDPRESS_UNZIP_DIR/wordpress/* /var/www/$DOMAIN_NAME
-sudo chown -R www-data:www-data /var/www/$DOMAIN_NAME
+#FIX for #4
+mkdir -p /var/www/$DOMAIN_NAME
+if [ $? -ne 0 ];then
+	echo "ERROR: Failed to Create Directory /var/www/$DOMAIN_NAME, Please check logfile $LOG_FILE" 1>&2
+	exit 1
+fi
+cp -rf $WORDPRESS_UNZIP_DIR/wordpress/* /var/www/$DOMAIN_NAME
+if [ $? -ne 0 ];then
+	echo "ERROR: Failed to copy $WORDPRESS_UNZIP_DIR/wordpress/* to /var/www/$DOMAIN_NAME, Please check logfile $LOG_FILE" 1>&2
+	exit 1
+fi
+
+#FIX for #6
+sed "s/username_here/wordpressuser/" /var/www/$DOMAIN_NAME/wp-config-sample.php > /var/www/$DOMAIN_NAME/wp-config1.php
+sed "s/database_name_here/$DOMAIN_NAME$DB_EXT/" /var/www/$DOMAIN_NAME/wp-config1.php > /var/www/$DOMAIN_NAME/wp-config2.php
+sed "s/password_here/password/" /var/www/$DOMAIN_NAME/wp-config2.php > /var/www/$DOMAIN_NAME/wp-config3.php
+mv /var/www/$DOMAIN_NAME/wp-config3.php /var/www/$DOMAIN_NAME/wp-config.php
+
+SALT=$(curl -s -L https://api.wordpress.org/secret-key/1.1/salt/)
+STRING='put your unique phrase here'
+printf '%s\n' "g/$STRING/d" a "$SALT" . w | ed -s /var/www/$DOMAIN_NAME/wp-config.php
+
+chown -R www-data:www-data /var/www/$DOMAIN_NAME
+if [ $? -ne 0 ];then
+	echo "ERROR: Failed to Ownership of www-data:www-data /var/www/$DOMAIN_NAME, Please check logfile $LOG_FILE" 1>&2
+	exit 1
+fi
 chmod -R 755 /var/www
-
-cat <<WP_CONFIG >/var/www/$DOMAIN_NAME/wp-config.php
-<?php
-/**
- * The base configurations of the WordPress.
- *
- * This file has the following configurations: MySQL settings, Table Prefix,
- * Secret Keys, WordPress Language, and ABSPATH. You can find more information
- * by visiting {@link http://codex.wordpress.org/Editing_wp-config.php Editing
- * wp-config.php} Codex page. You can get the MySQL settings from your web host.
- *
- * This file is used by the wp-config.php creation script during the
- * installation. You don't have to use the web site, you can just copy this file
- * to "wp-config.php" and fill in the values.
- *
- * @package WordPress
- */
-
-// ** MySQL settings - You can get this info from your web host ** //
-/** The name of the database for WordPress */
-define('DB_NAME', '$DOMAIN_NAME$DB_EXT');
-
-/** MySQL database username */
-define('DB_USER', 'wordpressuser');
-
-/** MySQL database password */
-define('DB_PASSWORD', 'password');
-
-/** MySQL hostname */
-define('DB_HOST', 'localhost');
-
-/** Database Charset to use in creating database tables. */
-define('DB_CHARSET', 'utf8');
-
-/** The Database Collate type. Don't change this if in doubt. */
-define('DB_COLLATE', '');
-
-/**#@+
- * Authentication Unique Keys and Salts.
- *
- * Change these to different unique phrases!
- * You can generate these using the {@link https://api.wordpress.org/secret-key/1.1/salt/ WordPress.org secret-key service}
- * You can change these at any point in time to invalidate all existing cookies. This will force all users to have to log in again.
- *
- * @since 2.6.0
- */
-define('AUTH_KEY',         'put your unique phrase here');
-define('SECURE_AUTH_KEY',  'put your unique phrase here');
-define('LOGGED_IN_KEY',    'put your unique phrase here');
-define('NONCE_KEY',        'put your unique phrase here');
-define('AUTH_SALT',        'put your unique phrase here');
-define('SECURE_AUTH_SALT', 'put your unique phrase here');
-define('LOGGED_IN_SALT',   'put your unique phrase here');
-define('NONCE_SALT',       'put your unique phrase here');
-
-/**#@-*/
-
-/**
- * WordPress Database Table prefix.
- *
- * You can have multiple installations in one database if you give each a unique
- * prefix. Only numbers, letters, and underscores please!
- */
-\$table_prefix  = 'wp_';
-
-/**
- * WordPress Localized Language, defaults to English.
- *
- * Change this to localize WordPress. A corresponding MO file for the chosen
- * language must be installed to wp-content/languages. For example, install
- * de_DE.mo to wp-content/languages and set WPLANG to 'de_DE' to enable German
- * language support.
- */
-define('WPLANG', '');
-
-/**
- * For developers: WordPress debugging mode.
- *
- * Change this to true to enable the display of notices during development.
- * It is strongly recommended that plugin and theme developers use WP_DEBUG
- * in their development environments.
- */
-define('WP_DEBUG', false);
-
-/* That's all, stop editing! Happy blogging. */
-
-/** Absolute path to the WordPress directory. */
-if ( !defined('ABSPATH') )
-	define('ABSPATH', dirname(__FILE__) . '/');
-
-/** Sets up WordPress vars and included files. */
-require_once(ABSPATH . 'wp-settings.php');
-WP_CONFIG
-
+echo ""
+echo ""
 echo "Step -5 Completed. Configuration Successfull"
 echo ""
 echo ""
 echo "Step -6:"
+echo ""
+echo ""
 echo "	Creating MySQL database..."
-mysql --user=root --password=$DB_ROOT_PASS --execute="CREATE DATABASE \`$DOMAIN_NAME$DB_EXT\`; grant all on \`$DOMAIN_NAME$DB_EXT\`.* to 'wordpressuser'@'localhost' identified by 'password'; FLUSH PRIVILEGES;" >> $LOG_FILE 2>&1 
+#FIX for #5
+mysql --user=root --password=$DB_ROOT_PASS --execute="CREATE DATABASE IF NOT EXISTS \`$DOMAIN_NAME$DB_EXT\`; grant all on \`$DOMAIN_NAME$DB_EXT\`.* to 'wordpressuser'@'localhost' identified by 'password'; FLUSH PRIVILEGES;" >> $LOG_FILE 2>&1 
 
 if [ $? -ne 0 ];then
 	echo "ERROR: Failed to Create Database, Please check logfile $LOG_FILE" 1>&2
 	exit 1
 fi
 
+echo ""
+echo ""
+echo "Step -6 Completed."
+
 rm $WORDPRESS_ZIP
 rm -rf $WORDPRES_UNZIP_DIR
+rm -rf /var/www/$DOMAIN_NAME/wp-config1.php /var/www/$DOMAIN_NAME/wp-config2.php
 
-echo "Step -7 Completed."
+
 echo ""
 echo ""
 echo "Script Executed Successfully." 
