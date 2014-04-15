@@ -20,6 +20,13 @@ DB_EXT="_db"
 DB_ROOT_PASS="root"
 WORDPRESS_ZIP="`mktemp`.zip"
 WORDPRESS_UNZIP_DIR="`mktemp -d`"
+LINUX_DISTRO="`lsb_release -i | cut -d':' -f2 | awk '{print $1}'`"
+
+if [ $LINUX_DISTRO != "Ubuntu" ] && [ $LINUX_DISTRO != "Debian" ];then
+	echo "This scripts is created to Work on Ubuntu or Debian" 1>&2
+	echo "Quiting..." 1>&2
+	exit 1
+fi 
 
 if [[ $EUID -ne 0 ]]; then
 	echo "This script must be run as root" 1>&2
